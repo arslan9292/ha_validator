@@ -3,7 +3,8 @@
 """
 
 @author    : Arslan Ahmad
-VERSION_NUMBER = 1
+
+VERSION_NUMBER = 3.7
 
 """
 
@@ -63,6 +64,8 @@ locking_type = 0
 hafs = 0
 pkg_mismatch = []
 pkg_duplicate = []
+platform_fence_compatible = 1
+iofence = 0
 
 def __get_args() :
     description =  "This script will help to get the basic validation check of Pacemaker Cluster over RHEL6/7/8. "
@@ -220,7 +223,7 @@ def samecluster():
                         print("Do me a favor, check if customer has shared any attachment on the case " + str(case) + " and then re-initiate the script.\n")
                         exit()
                     else:
-                        print("Oh God..!! You are sleeping..Please enter the correct case number.\n")
+                        print("You must be thinking about what was the root cause, that you forgot to check if there are any attachments!!\n")
                         inputcase = 0
                     continue
             elif yank != 0:
@@ -564,6 +567,8 @@ def main():
                                     return("Manufacturer: RHEV")
                                 elif re.search("OpenStack", hws):
                                     return("Manufacturer: OpenStack")
+                                elif re.search("RHEL", hws):
+                                    return("Manufacturer: RHEV")
                             elif re.search("RDO", hw):
                                 hws = (next(ifile, '').strip())
                                 if re.search("OpenStack", hws):
@@ -967,11 +972,13 @@ def main():
 
         if (typeos == str("rhel8")) & (len(final_ip) > len(final_ring)):
             if (len(final_ip) % len(final_ring) == 0):
-                k = 0
+                b = 1
                 r = q
-                for k in range(k, q):
-                    final_ring.insert(r-1, " ")
-                    r = r + 2
+                for i in range(i, actualnode):
+                    for b in range(b, q):
+                        final_ring.insert(b, " ")
+                        r = r + 2
+                    b = 2
 
         for j in range(j, l):
             if k == 1:
@@ -1471,7 +1478,7 @@ def main():
 
         i=0
         correct_map = 0
-        for i in pcmk_host_map:
+        for i in set(pcmk_host_map):
             j=0
             for j in range(j, len(final_ring)):
                 if i == final_ring[j]:
@@ -1479,7 +1486,7 @@ def main():
                     break
         
         correct_list = 0
-        for i in pcmk_host_list:
+        for i in set(pcmk_host_list):
             j=0
             for j in range(j, len(final_ring)):
                 if i == final_ring[j]:
@@ -1487,10 +1494,10 @@ def main():
                     break
 
         if (correct_map != len(pcmk_host_map)) & (correct_map != len(final_ring)):
-            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The value of pcmk_host_map needs a correction else fence failures will be reported.")
+            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The value of pcmk_host_map needs a correction else fence failures will be reported. Refer: https://access.redhat.com/solutions/2619961")
         
         if (correct_list != len(pcmk_host_list)) & (correct_list != len(final_ring)):
-            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The value of pcmk_host_list needs a correction else fence failures will be reported.")
+            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The value of pcmk_host_list needs a correction else fence failures will be reported. Refer: https://access.redhat.com/solutions/2619961")
 
         if len(fence_ip) > 1:
             if len(set(fence_ip)) == 1:
@@ -1499,7 +1506,7 @@ def main():
         if len(fence_disabled) != 0:
             print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The following fence resource(s) are disabled: " + str(fence_disabled) + ".\n")
 
-        if (len(pcmk_host_list) == 0) & (len(pcmk_host_map) == 0) & (sbd !=1 ):
+        if (len(pcmk_host_list) == 0) & (len(pcmk_host_map) == 0) & (sbd !=1 ) & (len(fencedevices) != 0):
             if (len(pcmk_host_list) == 0):
                 print("\n - None of the fence resources are configured with 'pcmk_host_list' parameter. This will need a correction as fence resources must be defined with 'pcmk_host_list'.")
             elif (len(pcmk_host_map) == 0):
@@ -1507,10 +1514,38 @@ def main():
 
     #******************************* Ends *******************************#
 
+    ##### Verify if fence agent is valid for the platform #####
+
+    global platform_fence_compatible
+    hardware = hwtype(0)
+    if (len(fencedevices) != 0):
+        for i in fencedevices:
+            if (hardware.find("VMware") != -1):
+                if ((str(i) != 'fence_vmware_soap') and (str(i) != 'fence_vmware_rest') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump')):
+                    platform_fence_compatible = 0
+            elif re.search('HP|Lenovo|IBM|LENOVO|Cisco', hardware):
+                if ((str(i) != 'fence_ipmilan') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump') and (str(i) != 'fence_idrac') and (str(i) != 'fence_cisco_ucs') and (str(i) != 'fence_sbd')) and (not re.search('fence_ilo.+', str(i))):
+                    platform_fence_compatible = 0
+            elif (hardware.find("Google") != -1):
+                if ((str(i) != 'fence_gce') and (str(i) != 'fence_kdump')):
+                    platform_fence_compatible = 0
+            elif (hardware.find("Amazon EC2") != -1):
+                if ((str(i) != 'fence_aws') and (str(i) != 'fence_kdump')):
+                    platform_fence_compatible = 0
+            elif (hardware.find("Microsoft Corporation") != -1):
+                if ((str(i) != 'fence_azure_arm') and (str(i) != 'fence_kdump')):
+                    platform_fence_compatible = 0
+
+    if platform_fence_compatible == 0:
+        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " The fence agent %s is incompatible with the platform %s."%(str(i),hardware))
+
+    #******************************* Ends *******************************#
+
     ##### Suggest the fence device to be configured provided environment as a whole is supported #####
 
     global supported
     global ssh_fence
+    global iofence
     hardware = hwtype(0)
     if rgmanager != 1:
         hwlist = 'HP|Dell|Cisco|Lenovo|VMware|KVM|RHEV|Google|Amazon EC2|Microsoft Corporation|IBM|LENOVO'
@@ -1533,7 +1568,7 @@ def main():
                 print("\n\033[1;33m {}\033[00m".format("WARNING:") + " Please check if the hardware '" + str(hardware) + "' is supported for RHEL Cluster Setup or not.")
 
         elif (supported == 1) & ((cib_exists == 1) or (nocib == 0)):
-            if ((len(fencedevices) == 0) & (sbd == 0)) or (only_kdump == 1):
+            if ((len(fencedevices) == 0) & (sbd == 0)) or (only_kdump == 1) or (platform_fence_compatible == 0):
                 print("\n\t***** Fence Agent recommendation *****")
                 if (hardware.find("VMware") != -1):
                     if (typeos == str("rhel6")):
@@ -1793,7 +1828,7 @@ def main():
                 corosync_runtime_value.append(' - ')
             # print(corosync_runtime_value)        
             return(corosync_runtime_value)
-    
+
     ##### Confirm corosync.conf file is same across all nodes #####
 
     def corosync_conf_file_consistency():
@@ -1811,7 +1846,7 @@ def main():
                     md5.append(md5_returned)
             else:
                 md5.append('file-unavailable')
-        
+
         # print(md5)
         if not 'file-unavailable' in md5:
             if len(set(md5)) != 1:
@@ -1851,7 +1886,7 @@ def main():
                 if z != 0:
                     print("\n".join(rrp_table.get_string().splitlines()[-2:]))
         elif (typeos == str("rhel8")) & ((len(set(rrp_runtime)) == 1) or (len(set(rrp)) == 1)) & ((rrp[0] != ' - ') or (rrp_runtime[0] != ' - ')):
-            print("\033[1;31m {}\033[00m".format("ALERT:") + " This is a RHEL 8 cluster setup with redundant rings and has `rrp_mode` configured. RRP is not supported in RHEL 8 - it is replaced by the knet. KCS: https://access.redhat.com/articles/3068841 for more information).\n")
+            print("\n\033[1;31m {}\033[00m".format("ALERT:") + " This is a RHEL 8 cluster setup with redundant rings and has `rrp_mode` configured. RRP is not supported in RHEL 8 - it is replaced by the knet. KCS: https://access.redhat.com/articles/3068841 for more information).\n")
     else:
         print("\n Seems to be some issue, please validate the RRP values manually and report this issue. Thank you & Sorry!")
 
@@ -1878,7 +1913,7 @@ def main():
             elif (str(rrp[0]) != " - ") & (len(final_ip) > actualnode):
                 support_rrp = "No"
                 tag_rrp = "True"
-                print("\033[1;31m {}\033[00m".format("ALERT:") + " RHEL8 cluster is not supported with RRP, it is replaced by the knet transport protocol. Please refer: https://access.redhat.com/articles/3068841 .\n")
+                # print("\033[1;31m {}\033[00m".format("ALERT:") + " RHEL8 cluster is not supported with RRP, it is replaced by the knet transport protocol. Please refer: https://access.redhat.com/articles/3068841 .\n")
             else:
                 support_rrp = "Yes"
                 tag_rrp = "False"
@@ -2274,10 +2309,10 @@ def main():
                 if (i.getAttribute("name") == "migration-threshold"):
                     migration_threshold = i.getAttribute("value")
 
-        if (resource_stick != 0):
-            print(" - Resource stickiness value = " + str(resource_stick))
-        if (migration_threshold !=0):
-            print(" - Migration threshold value = " + str(migration_threshold))
+            if (resource_stick != 0):
+                print(" - Resource stickiness value = " + str(resource_stick))
+            if (migration_threshold !=0):
+                print(" - Migration threshold value = " + str(migration_threshold))
 
     #******************************* Ends *******************************#
 
@@ -2325,6 +2360,9 @@ def main():
     vgname = []
     position = []
     attr = ["volgrpname", "vgname"]
+    mt_point_cluster = []
+    res_name = []
+    fs_cib_group = []
     if (rgmanager != 1) & (nocib == 0):
         filesys = xml.dom.minidom.parse(cib)
         group = filesys.getElementsByTagName("nvpair")
@@ -2340,6 +2378,21 @@ def main():
                 
             if i.getAttribute("name") == "volgrpname":
                 vgname.append(i.getAttribute("value"))
+
+        group = filesys.getElementsByTagName("primitive")
+        for i in group:
+            if i.getAttribute("type") == "Filesystem":
+                res_name.append(i.getAttribute("id"))
+        
+        group = filesys.getElementsByTagName("nvpair")
+        for j in res_name:
+            for i in group:
+                if (j+"-instance_attributes-directory").find(i.getAttribute("id")) != -1:
+                    fs_cib_group.append(i)
+
+        for i in fs_cib_group:
+            if i.getAttribute("name") == "directory":
+                mt_point_cluster.append(i.getAttribute("value"))
 
         z = 0
         if typeos == str("rhel7"):
@@ -2380,6 +2433,15 @@ def main():
 
     #******************************* Ends *******************************#
 
+    ##### Validate for different devices mounted at same mount-point #####
+
+    if (rgmanager != 1) & (nocib == 0):
+        if len(set(mt_point_cluster)) != len(mt_point_cluster):
+            multimount = [i for i in mt_point_cluster if i in list(set(mt_point_cluster))]
+            print("\033[1;33m {}\033[00m".format("WARNING:") + " Multiple Filesystem resources are managing the mount at %s mountpoint."%(list(set(multimount))))
+
+    #******************************* Ends *******************************#
+
     ##### Check for entries in lvm.conf file #####
 
     print("\n\t**** Validating entries under lvm.conf file ****\n")
@@ -2391,7 +2453,7 @@ def main():
             print(" - Checking for node " + str(u[int(z)]) + ":")
             with open(str(path[int(z)]) + "/etc/lvm/lvm.conf", "r") as ifile:
                 for line in ifile:
-                    if re.search("locking_type|use_lvmetad|volume_list|filter|global_filter|system_id_source|auto_activation_volume_list", line):
+                    if re.search("locking_type|use_lvmetad|volume_list|filter|global_filter|system_id_source|auto_activation_volume_list|use_lvmlockd", line):
                         param = line.lstrip()
                         if (param.startswith("locking_type")):
                             param = param.strip()
@@ -2432,12 +2494,30 @@ def main():
             print("\033[1;33m {}\033[00m".format("WARNING:") + " None of the sosreport has captured lvm.conf file.")
         print("\n")
 
-    if (use_lvmetad == 1) & (halvm == 1):
+    lvmetad_daemon = ['lvm2-lvmetad.service']
+    lvmetad_socket = ['lvm2-lvmetad.socket']
+    lvmetad_socket_srv = 0
+    lvmetad_srv = 0
+    lvmetad_daemon_status = service_is_active(lvmetad_daemon)
+    lvmetad_socket_status = service_is_active(lvmetad_socket)
+    if 1 in lvmetad_daemon_status:
+        lvmetad_srv = 1
+    if 1 in lvmetad_socket_status:
+        lvmetad_socket_srv = 1
+
+    if ((use_lvmetad == 1) or (lvmetad_srv == 1) or (lvmetad_socket_srv == 1)) & (halvm == 1):
         if typeos == str("rhel7"):
-            print("\033[1;33m {}\033[00m".format("WARNING:") + " lvmetad is enabled. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
+            if ((use_lvmetad == 1) & (lvmetad_srv == 1) & (lvmetad_socket_srv == 1)):
+                print("\033[1;33m {}\033[00m".format("WARNING:") + " `use_lvmetad` is set to 1 in `lvm.conf` file and `lvm2-lvmetad` service & socket is active. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
+            elif ((use_lvmetad == 0) & (lvmetad_srv == 1) & (lvmetad_socket_srv == 1)):
+                print("\033[1;33m {}\033[00m".format("WARNING:") + " `use_lvmetad` is set to 0 in `lvm.conf` file. However `lvm2-lvmetad` service & socket is active. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
+            elif (use_lvmetad == 0):
+                if (lvmetad_srv == 1):
+                    print("\033[1;33m {}\033[00m".format("WARNING:") + " `use_lvmetad` is set to 0 in `lvm.conf` file. However `lvm2-lvmetad.service` is active. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
+                elif (lvmetad_socket_srv == 1):
+                    print("\033[1;33m {}\033[00m".format("WARNING:") + " `use_lvmetad` is set to 0 in `lvm.conf` file. However `lvm2-lvmetad.socket` is active. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
         elif typeos == str("rhel8"):
             print("\033[1;33m {}\033[00m".format("WARNING:") + " lvmetad is no longer supported with RHEL8 setup. The correct steps to configure HA-LVM is detailed in KCS: https://access.redhat.com/solutions/3792761 .\n")
-
 
     if (halvm == 0) & (hafs == 1) & (gfs2 == 0) & (nfs == 0) & (glusterfs == 0) & (drbd == 0):
         if typeos == "rhel8":
@@ -2451,7 +2531,7 @@ def main():
             print("\033[1;33m {}\033[00m".format("WARNING:") + " HA-LVM setup is configured using CLVM which is adding an overhead to the configuration. Proper setup for HA-LVM is detailed in following KCS: https://access.redhat.com/solutions/3067 .\n")
     if (drbd == 1):
         print("The cluster has filesystem using a DRBD device. If the issue is with DRBD device, then LINBIT vendor should be first contacted. Please refer KCS: https://access.redhat.com/solutions/32085.\n")
-    if (rgmanager != 1):
+    if (rgmanager != 1) & (nocib == 0):
         if len(net_filesystem_resources) != 0:
             print("\033[1;31m {}\033[00m".format("ALERT:") + " The following list of Filesystem resource(s) are missing their corresponding LVM/LVM-activate resources: " + str(net_filesystem_resources) + ".\n")
 
@@ -2508,7 +2588,7 @@ def main():
             print("\033[1;33m {}\033[00m".format("WARNING:") + " Cluster is configured with 'LVM-activate/lvmlockd' resource agent which is a Tech-Preview in RHEL 7. To migrate on LVM resource agent, please refer KCS: https://access.redhat.com/solutions/6211831\n")
 
     #******************************* Ends *******************************#
-    
+
     ##### Validate if NFS filesystem is loopback mounted #####
 
     if (rgmanager != 1) & (nocib == 0):
@@ -2569,8 +2649,8 @@ def main():
 
     ##### Vaidate if Anti-Virus Software is running #####
 
-    anti_virus = ['ma.service', 'cma.service', 'mfetpd.service', 'rtvscand.service', 'ds_agent.service', 'falcon-sensor.service', 'b9daemon.service', 'traps_pmd.service', 'lightagent.service']
-    anti_virus_software = ['McAfee', 'McAfee', 'McAfee', 'Symantec', 'Trend Micro', 'Falcon Sensor (CrowdStrike)', 'Carbon Black', 'Traps Endpoint Security Manager', 'Kaspersky Security for Virtualization 5.2 Light Agent']
+    anti_virus = ['ma.service', 'cma.service', 'mfetpd.service', 'rtvscand.service', 'ds_agent.service', 'falcon-sensor.service', 'b9daemon.service', 'traps_pmd.service', 'lightagent.service', 'efs.service']
+    anti_virus_software = ['McAfee', 'McAfee', 'McAfee', 'Symantec', 'Trend Micro', 'Falcon Sensor (CrowdStrike)', 'Carbon Black', 'Traps Endpoint Security Manager', 'Kaspersky Security for Virtualization 5.2 Light Agent', 'ESET Server Security']
 
     i = 0
     av_status = []
@@ -2832,6 +2912,7 @@ if __name__ == "__main__":
                 use_lvmetad = 0
                 locking_type = 0
                 hafs = 0
+                platform_fence_compatible = 1
 
                 proceed = samecluster()
                 if proceed == "Same":
