@@ -4,7 +4,7 @@
 
 @author    : Arslan Ahmad
 
-VERSION_NUMBER = 3.7
+VERSION_NUMBER = 3.8
 
 """
 
@@ -123,6 +123,7 @@ def samecluster():
     rh6 = 0
     rh7 = 0
     rh8 = 0
+    rh9 = 0
     if (close == 0) & (different_cluster == 0):
         print("\n\t\033[1;32m {}\033[00m".format("READ:") + " Please make sure you have authorized your kerberos ID for performing 'yank'. If not, please kill the script and do 'yank -i'. Once done re-run the script.\n")
 
@@ -269,6 +270,7 @@ def samecluster():
         search_term1 = '2.6.32'
         search_term2 = '3.10.0'
         search_term3 = '4.18.0'
+        search_term4 = '5.14.0'
         loc = os.path.exists(str(path[int(z)]) + "/etc/redhat-release")
         if loc:
             with open(str(path[int(z)]) + "/etc/redhat-release", "r") as ifile:
@@ -286,6 +288,11 @@ def samecluster():
                     elif line.find('Red Hat Enterprise Linux release 8') != -1:
                         rhrelease.append(str(line.strip()))
                         redhatrelease = 'rhel8'
+                    elif line.find('Red Hat Enterprise Linux release 9') != -1:
+                        rhrelease.append(str(line.strip()))
+                        redhatrelease = 'rhel9'
+                        print("\nScript for RHEL 9 cluster validation is WIP. Please manually validate for now.\n")
+                        return ("powerkill")
                     elif line.find('CentOS') != -1:
                         print("\nThis server is running with " + line.strip() + " operating system. Hence exiting.\n")
                         return ("powerkill")
@@ -302,6 +309,9 @@ def samecluster():
         elif re.search(search_term3, v[int(z)]) or (redhatrelease == 'rhel8'):
             typeos = str("rhel8")
             rh8 = rh8 + 1
+        elif re.search(search_term4, v[int(z)]) or (redhatrelease == 'rhel9'):
+            typeos = str("rhel9")
+            rh9 = rh9 + 1
         else:
             typeos = str("rhel5")
 
@@ -519,7 +529,7 @@ def main():
             with open(str(path[int(z)]) + "/sos_commands/systemd/systemctl_status_--all", "r") as ifile:
                 lines = ifile.readlines()
                 for index, line in enumerate(lines):
-                    if line.startswith('* ' + service):
+                    if (line.startswith('* ' + service)) or (line.startswith('● ' + service)):
                         status = lines[index+x].strip()
                         if (x == 2) and (status.find("Active") == -1):
                             status = lines[index+x+2].strip()
@@ -553,7 +563,7 @@ def main():
 
     def hwtype(count):
         global path
-        if os.path.exists(str(path[int(z)]) + "/sos_commands/hardware/dmidecode"):
+        if os.path.exists(str(path[int(count)]) + "/sos_commands/hardware/dmidecode"):
             if os.stat(str(path[int(count)]) + "/sos_commands/hardware/dmidecode").st_size != 0:
                 with open(str(path[int(count)]) + "/sos_commands/hardware/dmidecode", "r") as ifile:
                     for line in ifile:
@@ -871,6 +881,7 @@ def main():
     new_ring = []
     cluster_name = []
     interface = []
+    interface_with_sosreport = {}
     cluster_notrunning = 0
     for z in range(z, int(node)):
         if ((typeos == str("rhel7")) or (typeos == str("rhel8"))) & (os.path.exists(str(path[int(z)]) + "sos_commands/corosync/corosync-cmapctl")):
@@ -890,6 +901,12 @@ def main():
                     if (line.find("cluster_name")) != -1:
                         cluster_name.append((line.split('(str) =')[1]).strip())
                         print(" - Cluster Name: %s\n"%cluster_name[0])
+                if len(ring_rhel8) == 0:
+                    with open(str(path[int(z)]) + "sos_commands/corosync/corosync-cmapctl", "r") as coro:
+                        for line in coro:
+                            if (line.find("nodelist")) != -1:
+                                if (line.find("_addr")) != -1:
+                                    ring_rhel8.append(line)
                 for i in ip:
                     test_ip = i.split('ip(')
                     for test in test_ip:
@@ -945,6 +962,8 @@ def main():
                         line_new = (line.split('/')[0]).split('inet')[1].strip()
                         if line_new.find(final_ip[i]) != -1:
                             interface.append((line.split('inet')[0].split()[1]))
+                            iface = line.split('inet')[0].split()[1]
+                            interface_with_sosreport.update({str(path[int(z)]): iface})
                             k = 1
                             break
             elif (typeos == str("rhel6"))& (os.path.exists(str(path[int(z)]) + "sos_commands/networking/ip_-o_addr")):
@@ -954,6 +973,8 @@ def main():
                             line_new = (line.split('/')[0]).split('inet')[1].strip()
                             if line_new.find(final_ip[i]) != -1:
                                 interface.append((line.split('inet')[0].split()[1]))
+                                iface = line.split('inet')[0].split()[1]
+                                interface_with_sosreport.update({str(path[int(z)]): iface})
                                 k = 1
                                 break
         if k == 0:
@@ -970,15 +991,19 @@ def main():
         q = int((len(final_ip)/actualnode))
         l = int((len(final_ip)/actualnode) + 1)
 
+        temp_ring = []
+        interim_ring = []
         if (typeos == str("rhel8")) & (len(final_ip) > len(final_ring)):
             if (len(final_ip) % len(final_ring) == 0):
-                b = 1
-                r = q
-                for i in range(i, actualnode):
-                    for b in range(b, q):
-                        final_ring.insert(b, " ")
-                        r = r + 2
-                    b = 2
+                div = len(final_ip) // len(final_ring)
+                for x in final_ring:
+                    temp_ring.append(str(x))
+                    val = 1
+                    for val in range(val, div):
+                        temp_ring.append(str(" "))
+                    interim_ring = interim_ring + temp_ring
+                    temp_ring = []
+                final_ring = interim_ring
 
         for j in range(j, l):
             if k == 1:
@@ -1002,24 +1027,44 @@ def main():
 
     def dhcp_fun():
         dhcp = 0
-        r = 0
-        for r in range(0, int(node)):
-            for inface in interface:
-                if inface != "N/A":
-                    if os.path.exists(str(path[int(r)]) + "/etc/sysconfig/network-scripts/ifcfg-" + inface):
-                        nw_script = open(str(path[int(r)]) + "/etc/sysconfig/network-scripts/ifcfg-" + inface, "r")
-                        nw = nw_script.read()
-                        nw_entry = nw.split("\n")
-                        for entry in nw_entry:
-                            if re.search('BOOTPROTO', entry):
-                                if re.search('dhcp', entry):
-                                    dhcp = 1
-                                break
+        for inface_path, inface_value in interface_with_sosreport.items():
+            if os.path.exists(str(inface_path) + "/etc/sysconfig/network-scripts/ifcfg-" + inface_value):
+                nw_script = open(str(inface_path) + "/etc/sysconfig/network-scripts/ifcfg-" + inface_value, "r")
+                nw = nw_script.read()
+                nw_entry = nw.split("\n")
+                for entry in nw_entry:
+                    if re.search('BOOTPROTO', entry):
+                        if re.search('dhcp', entry):
+                            dhcp = 1
+                        break
         return dhcp
         # if dhcp == 1:
         #     print('\n\t***** Validating if the HB interface configured with DHCP *****\n')
         #     print("\033[1;31m {}\033[00m".format("ALERT") + ": Heartbeat interface is configured with DHCP. The use of DHCP for obtaining an ip address on a network interface that it utilized by the corosync daemon is *not* supported. Refer KCS: https://access.redhat.com/solutions/1529133 .\n")
 
+
+    #******************************* Ends *******************************#
+
+    ##### Validate the MTU size for the heartbeat interface #####
+
+    i = 0
+    net_mtu = []
+    if ((typeos == str("rhel8")) or (typeos == str("rhel9"))):
+        for inface_path, inface_value in interface_with_sosreport.items():
+            if os.path.exists(str(inface_path) + "/sos_commands/networking/ip_-s_-d_link"):
+                mtu_file = open(str(inface_path) + "sos_commands/networking/ip_-s_-d_link", "r")
+                mtu_file_open = mtu_file.read()
+                mtu_file_lines = mtu_file_open.split("\n")
+                for entry in mtu_file_lines:
+                    if re.search(inface_value, entry):
+                        new_entry = entry.split()
+                        if re.search(inface_value, new_entry[1]):
+                            net_mtu.append(entry.split(" mtu ")[1].split(" qdisc ")[0])
+            i = i + 1
+        
+        if len(set(net_mtu)) > 1:
+            print("\n\t***** Validating the MTU size of heartbeat Interfaces ***** \n")
+            print("\033[1;31m {}\033[00m".format("ALERT") + ": Heartbeat interface is running with different MTU size. Please refer to KCS : https://access.redhat.com/solutions/7010647 .")
 
     #******************************* Ends *******************************#
 
@@ -1517,27 +1562,68 @@ def main():
     ##### Verify if fence agent is valid for the platform #####
 
     global platform_fence_compatible
-    hardware = hwtype(0)
-    if (len(fencedevices) != 0):
-        for i in fencedevices:
-            if (hardware.find("VMware") != -1):
-                if ((str(i) != 'fence_vmware_soap') and (str(i) != 'fence_vmware_rest') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump')):
-                    platform_fence_compatible = 0
-            elif re.search('HP|Lenovo|IBM|LENOVO|Cisco', hardware):
-                if ((str(i) != 'fence_ipmilan') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump') and (str(i) != 'fence_idrac') and (str(i) != 'fence_cisco_ucs') and (str(i) != 'fence_sbd')) and (not re.search('fence_ilo.+', str(i))):
-                    platform_fence_compatible = 0
-            elif (hardware.find("Google") != -1):
-                if ((str(i) != 'fence_gce') and (str(i) != 'fence_kdump')):
-                    platform_fence_compatible = 0
-            elif (hardware.find("Amazon EC2") != -1):
-                if ((str(i) != 'fence_aws') and (str(i) != 'fence_kdump')):
-                    platform_fence_compatible = 0
-            elif (hardware.find("Microsoft Corporation") != -1):
-                if ((str(i) != 'fence_azure_arm') and (str(i) != 'fence_kdump')):
-                    platform_fence_compatible = 0
+    hardware_list = []
+    network_fencing = 0
+    valid_fence = 0
+    invalid_agent = []
+    valid_agent = []
+    z = 0
+    for z in range(z, int(node)):
+        hardware_list.append(hwtype(z))
+    # hardware = hwtype(0)
+    if len(set(hardware_list)) == 1:
+        hardware = hardware_list[0]
+        if (len(fencedevices) != 0):
+            for i in fencedevices:
+                if (hardware.find("VMware") != -1):
+                    if ((str(i) != 'fence_vmware_soap') and (str(i) != 'fence_vmware_rest') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump')):
+                        invalid_agent.append(str(i))
+                        platform_fence_compatible = 0
+                    if ((str(i) == 'fence_vmware_soap') or (str(i) == 'fence_vmware_rest') or (str(i) == 'fence_scsi') or (str(i) == 'fence_mpath') or (str(i) == 'fence_kdump')):
+                        valid_agent.append(str(i))
+                        valid_fence = 1
+                elif re.search('HP|Lenovo|IBM|LENOVO|Cisco', hardware):
+                    if ((str(i) != 'fence_ipmilan') and (str(i) != 'fence_scsi') and (str(i) != 'fence_mpath') and (str(i) != 'fence_kdump') and (str(i) != 'fence_idrac') and (str(i) != 'fence_cisco_ucs') and (str(i) != 'fence_sbd') and (str(i) != 'fence_imm')) and (not re.search('fence_ilo.+', str(i))) and (str(i) != 'fence_apc_snmp'):
+                        invalid_agent.append(str(i))
+                        platform_fence_compatible = 0
+                    if ((str(i) == 'fence_ipmilan') or (str(i) == 'fence_scsi') or (str(i) == 'fence_mpath') or (str(i) == 'fence_kdump') or (str(i) == 'fence_idrac') or (str(i) == 'fence_cisco_ucs') or (str(i) == 'fence_sbd') or (str(i) == 'fence_imm')) or (not re.search('fence_ilo.+', str(i))) or (str(i) == 'fence_apc_snmp'):
+                        valid_agent.append(str(i))
+                        valid_fence = 1
+                    if str(i) == 'fence_apc_snmp':
+                        network_fencing = 1
+                elif (hardware.find("Google") != -1):
+                    gcp = 1
+                    if ((str(i) != 'fence_gce') and (str(i) != 'fence_kdump')):
+                        invalid_agent.append(str(i))
+                        platform_fence_compatible = 0
+                    if ((str(i) == 'fence_gce') or (str(i) == 'fence_kdump')):
+                        valid_agent.append(str(i))
+                        valid_fence = 1
+                elif (hardware.find("Amazon EC2") != -1):
+                    aws = 1
+                    if ((str(i) != 'fence_aws') and (str(i) != 'fence_kdump')):
+                        invalid_agent.append(str(i))
+                        platform_fence_compatible = 0
+                    if ((str(i) == 'fence_aws') or (str(i) == 'fence_kdump')):
+                        valid_agent.append(str(i))
+                        valid_fence = 1
+                elif (hardware.find("Microsoft Corporation") != -1):
+                    azure = 1
+                    if ((str(i) != 'fence_azure_arm') and (str(i) != 'fence_kdump')):
+                        invalid_agent.append(str(i))
+                        platform_fence_compatible = 0
+                    if ((str(i) == 'fence_azure_arm') or (str(i) == 'fence_kdump')):
+                        valid_agent.append(str(i))
+                        valid_fence = 1
+    else:
+        print("\n - The cluster nodes are of mixed platform: %s with fence agent types: %s."%(set(hardware_list), set(fencedevices)))
+        platform_fence_compatible = 2
 
-    if platform_fence_compatible == 0:
-        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " The fence agent %s is incompatible with the platform %s."%(str(i),hardware))
+    if (platform_fence_compatible == 0):
+        if (valid_fence == 0):
+            print("\n\033[1;31m {}\033[00m".format("ALERT:") + " The fence agent %s is incompatible with the platform %s."%(str(i),hardware))
+        elif (valid_fence == 1):
+            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster is configured with a correct fence agent %s as well as an incorrect fence agent %s. Please remove the configuration for invalid fence agent %s."%(valid_agent,invalid_agent,invalid_agent))
 
     #******************************* Ends *******************************#
 
@@ -1546,7 +1632,8 @@ def main():
     global supported
     global ssh_fence
     global iofence
-    hardware = hwtype(0)
+    openstack = 0
+    hardware = hardware_list[0]
     if rgmanager != 1:
         hwlist = 'HP|Dell|Cisco|Lenovo|VMware|KVM|RHEV|Google|Amazon EC2|Microsoft Corporation|IBM|LENOVO'
         phyHW = 'HP|Dell|Lenovo|IBM|LENOVO'   ## Removed 'Cisco' from this list
@@ -1558,23 +1645,24 @@ def main():
 
         if (supported == 0) & (re.match("empty_file", hdware) == None) & (re.match("no_file", hdware) == None):
             if re.search("OpenStack", hardware):
-                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster environment is configured over OpenStack VMs which is not supported. Refer KCS: https://access.redhat.com/articles/3131311 .")
+                openstack = 1
+                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster environment is configured over OpenStack VMs. Please ensure that the policies are met. Refer KCS: https://access.redhat.com/articles/3131311 .")
             elif re.search("Xen", hardware):
                 if (aws == 0):
                     print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster environment is configured over Xen systems which is not supported. Refer KCS: https://access.redhat.com/articles/3131361 .")
             elif re.search("Nutanix", hardware):
-                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster environment is configured over Nutanix AHV which is not a supported platform for RHEL. Refer KCS: https://access.redhat.com/solutions/3432561 .")            
+                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The cluster environment is configured over Nutanix AHV which is not a supported platform for RHEL. Refer KCS: https://access.redhat.com/articles/6113961 .")            
             else:
                 print("\n\033[1;33m {}\033[00m".format("WARNING:") + " Please check if the hardware '" + str(hardware) + "' is supported for RHEL Cluster Setup or not.")
 
-        elif (supported == 1) & ((cib_exists == 1) or (nocib == 0)):
+        elif (supported == 1) & ((cib_exists == 1) or (nocib == 0)) & (valid_fence == 0):
             if ((len(fencedevices) == 0) & (sbd == 0)) or (only_kdump == 1) or (platform_fence_compatible == 0):
                 print("\n\t***** Fence Agent recommendation *****")
                 if (hardware.find("VMware") != -1):
                     if (typeos == str("rhel6")):
                         print("\n - Since the environment is configured over " + hardware + ", please configure 'fence_vmware_soap' fence agent as detailed in KCS: https://access.redhat.com/solutions/68064 .")
                     else:
-                        print("\n - Since the environment is configured over " + hardware + ", please configure 'fence_vmware_soap' fence agent as detailed in KCS: https://access.redhat.com/solutions/917813 .")
+                        print("\n - Since the environment is configured over " + hardware + ", please configure either 'fence_vmware_soap' fence agent as detailed in KCS: https://access.redhat.com/solutions/917813 or 'fence_vmware_rest' fence agent as detailed in KCS: https://access.redhat.com/solutions/3510461 .")
                 elif re.search(phyHW, hardware):
                     print("\n - Since the environment is configured over hardware " + hardware + ", please configure 'fence_ipmilan' fence agent as detailed in KCS: https://access.redhat.com/solutions/2271811 .")
                 elif (hardware.find("Cisco") != -1):
@@ -1599,9 +1687,9 @@ def main():
                     print("\n\033[1;33m {}\033[00m".format("WARNING:") + " You are using I/O fence agent " + str(set(fencedevices)) + " in VMware platform. Please ensure the pre-requisites are met. Refer: https://access.redhat.com/articles/3078811 .\n")
                 elif (sbd == True):
                     if (len(set(fencedevices)) == 0):
-                        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " You are currently using sbd as fence agent in your VMware environment. Please note: this fence agent is not supported in VMware due to unavailability of software watchdog (KCS: https://access.redhat.com/articles/2800691). Hence please configure 'fence_vmware_soap'." + "\n")
+                        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " You are currently using sbd as fence agent in your VMware environment. Please note: this fence agent is not supported in VMware due to unavailability of software watchdog (KCS: https://access.redhat.com/articles/2800691). Hence please configure 'fence_vmware_soap' or 'fence_vmware_rest'." + "\n")
                     else:
-                        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " You are currently using fence_sbd/sbd as fence agent in your VMware environment. Please note: this fence agent is not supported in VMware due to unavailability of software watchdog (KCS: https://access.redhat.com/articles/2800691). Hence please configure 'fence_vmware_soap'." + "\n")
+                        print("\n\033[1;31m {}\033[00m".format("ALERT:") + " You are currently using fence_sbd/sbd as fence agent in your VMware environment. Please note: this fence agent is not supported in VMware due to unavailability of software watchdog (KCS: https://access.redhat.com/articles/2800691). Hence please configure 'fence_vmware_soap' or 'fence_vmware_rest'." + "\n")
                     if (typeos == "rhel6"):
                         print(" - Refer KCS article for fence_vmware_soap: https://access.redhat.com/solutions/68064 .\n")
                     elif (typeos == "rhel7") or (typeos == "rhel8"):
@@ -1609,6 +1697,8 @@ def main():
             else:
                 if ssh_fence == 0:
                     print("\n - Depending on the hardware '" + str(hardware) + "', cluster is configured using a correct fence agent.\n")
+                if network_fencing == 1:
+                    print(" - The cluster is configured with APC network power switch.\n")
                 if re.search("Microsoft Corporation", hardware):
                     print(" *NOTE* - The file 'dmidecode' says same for Hyper-V and Azure. Please ensure that the environment is Azure, because Hyper-V in cluster is not yet supported. Refer: https://access.redhat.com/articles/3131321 .")
         else:
@@ -1658,13 +1748,10 @@ def main():
                 z = z + 1
 
     if rgmanager != 1:
-        if (len(graceful_reboot) != 0) & (typeos == str("rhel7")) & (iofence == 0):
-            print("\033[1;33m {}\033[00m".format("WARNING:") + " The cluster node(s) " + str(graceful_reboot) + " is configured for graceful reboot & this may lead to fence failure. Refer KCS: https://access.redhat.com/solutions/1578823 .")
-        elif (len(graceful_reboot) != 0) & (typeos == str("rhel8")) & (iofence == 0):
-            print("\033[1;33m {}\033[00m".format("WARNING:") + " The cluster node(s) " + str(graceful_reboot) + " is configured for graceful reboot & this may lead to fence failure. Refer KCS: https://access.redhat.com/solutions/1578823 .")
-        elif (len(graceful_reboot) != 0) & (typeos == str("rhel6")):
+        if (len(graceful_reboot) != 0) & (typeos == str("rhel6")):
             print("\033[1;33m {}\033[00m".format("WARNING:") + " The cluster node(s) " + str(graceful_reboot) + " is configured for graceful reboot & this may lead to fence failure. Refer KCS: https://access.redhat.com/solutions/5414 .")
-
+        elif (len(graceful_reboot) != 0) & (iofence == 0):
+            print("\033[1;33m {}\033[00m".format("WARNING:") + " The cluster node(s) " + str(graceful_reboot) + " is configured for graceful reboot & this may lead to fence failure. Refer KCS: https://access.redhat.com/solutions/1578823 .")
         
     #******************************* Ends *******************************#
 
@@ -1712,7 +1799,7 @@ def main():
     ## DHCP Continued ... ##
     
     dhcp = dhcp_fun()
-    if (dhcp == 1) & (azure != 1) & (aws != 1) & (gcp != 1) & (len(fencedevices) != 0):
+    if (dhcp == 1) & (azure != 1) & (aws != 1) & (gcp != 1) & (len(fencedevices) != 0) & (openstack != 1):
         print('\n\t***** Validating if the HB interface configured with DHCP *****\n')
         print("\033[1;31m {}\033[00m".format("ALERT") + ": Heartbeat interface is configured with DHCP. The use of DHCP for obtaining an ip address on a network interface that it utilized by the corosync daemon is *not* supported. Refer KCS: https://access.redhat.com/solutions/1529133 .\n")
 
@@ -1734,7 +1821,7 @@ def main():
                         temp = ifile.readlines()
                         for line in temp:
                             if re.search(word, line):
-                                corosync_value.append((line.split(": ")[1]).strip())
+                                corosync_value.append((line.split(":")[1]).strip())
                                 flag = 1
                                 break
                         if flag != 1:
@@ -1943,6 +2030,21 @@ def main():
                     # TO-DO: Need to check for multiple ring in RHEL8 setup as multiple ring in DLM is not supported.
                 else:
                     print(" - No RRP configuration alongside DLM, so all good.\n")
+            elif re.search("Error: cannot load cluster status", pcsconfig):
+                if (cib_exists == 1) or (nocib == 0):
+                    quorum = xml.dom.minidom.parse(cib)
+                    group = quorum.getElementsByTagName("primitive")
+                    for i in group:
+                        if i.getAttribute("type") == "controld":
+                            print("\n\t***** DLM is configured, so is RRP mode set ? *****\n")
+                            support_dlm = "True"
+                            if tag_rrp == "True":
+                                if typeos == "rhel7":
+                                    print("\033[1;31m {}\033[00m".format("ALERT:") + " Yes, it is..!!! RRP Mode (be it 'active' or 'passive') with DLM is not supported. Please refer to following article for more details: https://access.redhat.com/articles/3068921 .\n")
+                                elif typeos == "rhel8":
+                                    print("\033[1;31m {}\033[00m".format("ALERT:") + " Yes, it is..!!! RRP Mode in RHEL8 cluster is not supported. Please refer: https://access.redhat.com/articles/3068841 .\n" )
+                            else:
+                                print(" - No RRP configuration alongside DLM, so all good.\n")
         elif (newflag == True) or (newflag == "nofile"):
             for z in range(z, int(node)):
                 if (cib_exists == 1) or (nocib == 0):
@@ -2134,12 +2236,12 @@ def main():
                 with open(str(path[int(z)]) + "/etc/fstab", "r") as ifile:
                     temp = ifile.readlines()
                     for line in temp:
-                        if re.search("gfs2", line):
-                            gfs = line.startswith("#")
-                            if gfs == False:
+                        if not line.startswith("#"):
+                            elements = line.split()
+                            if len(elements) >= 3 and elements[2] == "gfs2":
                                 gfs2 = 1
                                 gfs2_fstab = 1
-                            break
+                            # break
     elif rgmanager == 1:
         filesys = corosync("fstype")
         filesystem = []
@@ -2182,27 +2284,37 @@ def main():
                 if len(set(token)) == 1:
                     if (str(token[0]) != " - ") & (typeos == str("rhel7") or typeos == str("rhel8")):
                         if int(token[0]) > 15000:
-                            print("\033[1;33m {}\033[00m".format("WARNING:") + " The environment is susceptible to clvmd start operation time out with dlm socket error. Consider reducing the totem token timeout value or increasing the boot time. Please refer `Workaround` section of KCS article: https://access.redhat.com/solutions/3667531 .\n")
+                            if typeos == str("rhel7"):
+                                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The environment is susceptible to clvmd start operation time out with dlm socket error. Consider reducing the totem token timeout value or increasing the boot time. Please refer `Workaround` section of KCS article: https://access.redhat.com/solutions/3667531 .\n")
+                            elif typeos == str("rhel8"):
+                                print("\n\033[1;33m {}\033[00m".format("WARNING:") + " The environment is susceptible to corruption of GFS2 filesystem. Refer KCS: https://access.redhat.com/solutions/5280531 .\n")
 
     #******************************* Ends *******************************#
 
     #### Validating if any GFS2 filesystem is withdrawn ####
 
     z = 0
+    j = 0
     gfs2_withdrawn_locktable = []
-    for withdraw in glob.iglob(str(path[int(z)]) + '/sys/fs/gfs2/'):
-        i = -1
-        for root, dirs, files in os.walk(withdraw):
-            if z == 0:
-                locktable = dirs
-                z = 1
-            if 'withdraw' in files:
-                gfs_withdraw = os.path.join(root, 'withdraw')
-                with open(gfs_withdraw, "r") as ifile:
-                    for line in ifile:
-                        if re.search("1", line):
-                            gfs2_withdrawn_locktable.append(locktable[i])
-            i = i + 1
+    gfs2_withdrawn_dir = []
+    for j in range(j, int(node)):
+        for withdraw in glob.iglob(str(path[int(j)]) + '/sys/fs/gfs2/'):
+            i = -1
+            for root, dirs, files in os.walk(withdraw):
+                if z == 0:
+                    locktable = dirs
+                    z = 1
+                if 'withdraw' in files:
+                    gfs_withdraw = os.path.join(root, 'withdraw')
+                    with open(gfs_withdraw, "r") as ifile:
+                        for line in ifile:
+                            if re.search("1", line):
+                                gfs2_withdrawn_dir.append(gfs_withdraw)
+                i = i + 1
+
+    if len(gfs2_withdrawn_dir) != 0:
+        for item in gfs2_withdrawn_dir:
+            gfs2_withdrawn_locktable.append(item.split("/")[-2])
 
     if len(gfs2_withdrawn_locktable) != 0:
         z = 0
@@ -2226,7 +2338,7 @@ def main():
 
     #### Validating the number of cluster nodes falling within the support range ####
 
-    if (typeos == str("rhel7")) or (typeos == "rhel8"):
+    if (typeos == str("rhel7")) or (typeos == str("rhel8")):
         if (actualnode > 16) & (actualnode < 33):   # This will consider till 32 & exclude 33.
             if (support_dlm == "False"):
                 print("\033[1;33m {}\033[00m".format("WARNING:") + " The number of cluster nodes is greater than 16. Please check for the RHEL version.")
@@ -2437,8 +2549,36 @@ def main():
 
     if (rgmanager != 1) & (nocib == 0):
         if len(set(mt_point_cluster)) != len(mt_point_cluster):
-            multimount = [i for i in mt_point_cluster if i in list(set(mt_point_cluster))]
-            print("\033[1;33m {}\033[00m".format("WARNING:") + " Multiple Filesystem resources are managing the mount at %s mountpoint."%(list(set(multimount))))
+            multimount = []
+            for x in list(set(mt_point_cluster)):
+                count = 0
+                append = False
+                for y in mt_point_cluster:
+                    if x == y:
+                        count = count + 1
+                        if count > 1 and append == False:
+                            multimount.append(x)
+                            append = True
+            print("\n\033[1;33m {}\033[00m".format("WARNING:") + " Multiple Filesystem resources are managing the mount at %s mountpoint."%(multimount))
+
+    #******************************* Ends *******************************#
+
+    ##### Check for any `cli` constraints which gets added with `pcs resource move`  #####
+
+    if (rgmanager != 1) & (nocib == 0):
+        cli_resource = []
+        filesys = xml.dom.minidom.parse(cib)
+        group = filesys.getElementsByTagName("rsc_location")
+        for i in group:
+            if i.getAttribute("id").startswith("cli-"):
+                cli_resource.append(i.getAttribute("rsc"))
+        
+        if len(cli_resource) != 0:
+            print("\n - The cluster has INFINITY score constraints configured which gets added using `pcs resource move` command. It is recommended to clear these constraints in downtime window. Refer KCS: https://access.redhat.com/solutions/1325593 . The following commands can be used: \n")
+            print("\033[1;32m {}\033[00m".format("~~~"))
+            for i in cli_resource:
+                print(" # pcs resource clear %s"%(i))
+            print("\033[1;32m {}\033[00m".format("~~~\n"))
 
     #******************************* Ends *******************************#
 
@@ -2446,6 +2586,7 @@ def main():
 
     print("\n\t**** Validating entries under lvm.conf file ****\n")
     z = 0
+    overhead_setup = 0
     for z in range(z, int(node)):
         exist = os.path.exists(str(path[int(z)]) + "/etc/lvm/lvm.conf")
         if exist:
@@ -2517,13 +2658,17 @@ def main():
                 elif (lvmetad_socket_srv == 1):
                     print("\033[1;33m {}\033[00m".format("WARNING:") + " `use_lvmetad` is set to 0 in `lvm.conf` file. However `lvm2-lvmetad.socket` is active. Please disable with the steps detailed in KCS: https://access.redhat.com/solutions/2053483 .\n")
         elif typeos == str("rhel8"):
-            print("\033[1;33m {}\033[00m".format("WARNING:") + " lvmetad is no longer supported with RHEL8 setup. The correct steps to configure HA-LVM is detailed in KCS: https://access.redhat.com/solutions/3792761 .\n")
+            print("\033[1;33m {}\033[00m".format("WARNING:") + " lvmetad is no longer supported with RHEL8 setup. The correct steps to configure HA-LVM is detailed in KCS: https://access.redhat.com/solutions/3067 .\n")
 
     if (halvm == 0) & (hafs == 1) & (gfs2 == 0) & (nfs == 0) & (glusterfs == 0) & (drbd == 0):
         if typeos == "rhel8":
-            print("\033[1;31m {}\033[00m".format("ALERT:") + " LVM-activate resource is not configured, improper HA-LVM configuration. Refer KCS for correct configuration: https://access.redhat.com/solutions/3792761 .\n")
+            print("\033[1;31m {}\033[00m".format("ALERT:") + " LVM-activate resource is not configured, improper HA-LVM configuration. Refer KCS for correct configuration: https://access.redhat.com/solutions/3067 .\n")
         if typeos == "rhel7":
-            print("\033[1;31m {}\033[00m".format("ALERT:") + " LVM resource is not configured, improper HA-LVM configuration. Refer KCS for correct configuration: https://access.redhat.com/solutions/3067 .\n")
+            if support_dlm == "True":
+                overhead_setup = 1
+                print(" - It seems that the cluster is configured with DLM/clvmd to manage active/passive setup. This is an overhead to the setup as using LVM resource is a better approach. Refer KCS for making necessary changes: https://access.redhat.com/solutions/3067 .\n")
+            else:
+                print("\033[1;31m {}\033[00m".format("ALERT:") + " LVM resource is not configured, improper HA-LVM configuration. Refer KCS for correct configuration: https://access.redhat.com/solutions/3067 .\n")
     if (locking_type == 1) & (gfs2 == 1):
         print("\033[1;31m {}\033[00m".format("ALERT:") + " locking_type needs to be corrected and set to 3 with re-build of initramfs: https://access.redhat.com/solutions/1958 .\n")
     if (rgmanager != 1):
@@ -2531,8 +2676,8 @@ def main():
             print("\033[1;33m {}\033[00m".format("WARNING:") + " HA-LVM setup is configured using CLVM which is adding an overhead to the configuration. Proper setup for HA-LVM is detailed in following KCS: https://access.redhat.com/solutions/3067 .\n")
     if (drbd == 1):
         print("The cluster has filesystem using a DRBD device. If the issue is with DRBD device, then LINBIT vendor should be first contacted. Please refer KCS: https://access.redhat.com/solutions/32085.\n")
-    if (rgmanager != 1) & (nocib == 0):
-        if len(net_filesystem_resources) != 0:
+    if (rgmanager != 1) & (nocib == 0) & (drbd == 0):
+        if (len(net_filesystem_resources) != 0) & (overhead_setup == 0):
             print("\033[1;31m {}\033[00m".format("ALERT:") + " The following list of Filesystem resource(s) are missing their corresponding LVM/LVM-activate resources: " + str(net_filesystem_resources) + ".\n")
 
     #******************************* Ends *******************************#
@@ -2649,8 +2794,8 @@ def main():
 
     ##### Vaidate if Anti-Virus Software is running #####
 
-    anti_virus = ['ma.service', 'cma.service', 'mfetpd.service', 'rtvscand.service', 'ds_agent.service', 'falcon-sensor.service', 'b9daemon.service', 'traps_pmd.service', 'lightagent.service', 'efs.service']
-    anti_virus_software = ['McAfee', 'McAfee', 'McAfee', 'Symantec', 'Trend Micro', 'Falcon Sensor (CrowdStrike)', 'Carbon Black', 'Traps Endpoint Security Manager', 'Kaspersky Security for Virtualization 5.2 Light Agent', 'ESET Server Security']
+    anti_virus = ['ma.service', 'cma.service', 'mfetpd.service', 'rtvscand.service', 'ds_agent.service', 'falcon-sensor.service', 'b9daemon.service', 'traps_pmd.service', 'lightagent.service', 'efs.service', 'sav-protect.service']
+    anti_virus_software = ['McAfee', 'McAfee', 'McAfee', 'Symantec', 'Trend Micro', 'Falcon Sensor (CrowdStrike)', 'Carbon Black', 'Traps Endpoint Security Manager', 'Kaspersky Security for Virtualization 5.2 Light Agent', 'ESET Server Security', 'Sophos Anti-Virus']
 
     i = 0
     av_status = []
@@ -2687,17 +2832,17 @@ def main():
                     with open(str(path[int(z)]) + "/sos_commands/systemd/systemctl_status_--all", "r") as ifile:
                         lines = ifile.readlines()
                         for index, line in enumerate(lines):
-                            if line.startswith('* ' + anti_virus[i]):
+                            if (line.startswith('* ' + anti_virus[i])) or (line.startswith('● ' + anti_virus[i])):
                                 if y == 0:
                                     print(" - Service status for node " + str(u[int(z)]) + ":")
                                     y = 1
                                 x = 0
                                 for x in range(x, 4):
                                     if x == 0:
-                                        print("\033[1;32m {}\033[00m".format("---"))
+                                        print("\033[1;32m {}\033[00m".format("~~~"))
                                     print(lines[index+x].strip('\n'))
                                     if x == 3:
-                                        print("\033[1;32m {}\033[00m".format("---\n"))
+                                        print("\033[1;32m {}\033[00m".format("~~~\n"))
 
     #******************************* Ends *******************************#
 
